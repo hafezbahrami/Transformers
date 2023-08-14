@@ -1,0 +1,15 @@
+matplotlib
+numpy
+pandas
+scipy
+jupyter
+scikit-learn
+#-------------------
+torch
+# --- For Tranformer
+torchdata
+torchtext
+spacy
+portalocker
+# we should also install/download: python -m spacy download en_core_web_sm  
+# we should also install/download: python -m spacy download de_core_news_sm

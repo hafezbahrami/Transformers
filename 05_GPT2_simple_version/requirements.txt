@@ -1,0 +1,11 @@
+# requirements.txt
+
+matplotlib
+numpy
+pandas
+scipy
+jupyter
+scikit-learn
+#-------------------
+torch
+tensorboard
