@@ -25,37 +25,37 @@ class BigramLanguageModel(nn.Module):
         self.ln_f = nn.LayerNorm(emb_size) # final layer norm
         self.lm_head_classifier = nn.Linear(emb_size, vocab_size)
 
-    def forward(self, X, targets=None):
-        Bs, T = X.shape # T: sent_length
-        # idx and targets are both (B,T) tensor of integers
+    def forward(self, X, Y_lab=None):
+        Bs, T = X.shape # X: ==> shape: (Bs,T)  ==> T is sent length
+        # idx and Y_lab are both (B,T) tensor of integers
         tok_emb = self.token_embedding_table(X) # (Bs,T,emb_size)
         if self.sinusoidal_pos_encoding:
-            pos_emb = self.position_embedding_table(tok_emb)  # (T,emb_size)
+            pos_emb = self.position_embedding_table(tok_emb)  # (Bs, T, emb_size)
         else:
-            pos_emb = self.position_embedding_table(torch.arange(T, device=device)) # (T,emb_size)
-        x = tok_emb + pos_emb # with broadcasting (right-alighned, then add 1 for the missing dimension) ==> (Bs,T,emb_size)
-        x = self.transformer_blocks(x) # (Bs,T,emb_size)
-        x = self.ln_f(x) # (Bs,T,emb_size)
-        logits = self.lm_head_classifier(x) # (Bs,T,vocab_size)
+            pos_emb = self.position_embedding_table(torch.arange(T, device=device)) # (T, emb_size) --> Latere on, it will be BroadCast to match (Bs, T,emb_size)
+        X = tok_emb + pos_emb # if needed tensor BroadCasting (right-alighned, then add 1 for the missing dimension) willl be done ==> (Bs,T,emb_size)
+        X = self.transformer_blocks(X) # (Bs, T, emb_size)
+        X = self.ln_f(X) # (Bs, T, emb_size)
+        Y_logits = self.lm_head_classifier(X) # (Bs, T, vocab_size)
 
-        if targets is None:
+        if Y_lab is None:
             loss = None
         else:
-            """Getting the shape in the format the nn.CrossEntropyLoss() needs"""
-            Bs, T, c_vocab_size = logits.shape # (Bs,T,emb_size)
-            logits = logits.view(Bs*T, c_vocab_size)
-            targets = targets.view(Bs*T)
-            loss = F.cross_entropy(logits, targets)
+            """Getting the shape in the format suitable for the nn.CrossEntropyLoss() needs"""
+            Bs, T, embed_size = Y_logits.shape # (Bs,T,emb_size)
+            Y_logits = Y_logits.view(Bs*T, embed_size)
+            Y_lab = Y_lab.view(Bs*T)
+            loss = F.cross_entropy(Y_logits, Y_lab)
 
-        return logits, loss
+        return Y_lab, loss
 
     def generate(self, X, max_len_sentence_to_be_created):
         # X is (Bs, T) array of indices in the current context
         for _ in range(max_len_sentence_to_be_created):
             X_context = X[:, -self.sent_len:] # crop X to the last sent_len tokens
-            logits, loss = self(X_context) # get the predictions
-            logits = logits[:, -1, :] # becomes (Bs, emb_size): focus only on the last time step
-            probs = F.softmax(logits, dim=-1) # (Bs, emb_size): apply softmax to get probabilities
+            Y_logits, loss = self(X_context) # get the predictions
+            Y_logits = Y_logits[:, -1, :] # becomes (Bs, emb_size): focus only on the last time step
+            probs = F.softmax(Y_logits, dim=-1) # (Bs, emb_size): apply softmax to get probabilities
             X_next = torch.multinomial(probs, num_samples=1) # (B, 1): sample from the distribution
             X = torch.cat((X, X_next), dim=1) # (Bs, T+1): append sampled index to the running sequence
         return X
@@ -73,17 +73,17 @@ class PositionalEncoding(nn.Module):
 
         position = torch.arange(max_len).unsqueeze(1)
         div_term = torch.exp(torch.arange(0, emb_size, 2) * (-math.log(10000.0) / emb_size))
-        pe = torch.zeros(max_len, 1, emb_size)
-        pe[:, 0, 0::2] = torch.sin(position * div_term)
-        pe[:, 0, 1::2] = torch.cos(position * div_term)
+        pe = torch.zeros(max_len, emb_size)
+        pe[:, 0::2] = torch.sin(position * div_term)
+        pe[:, 1::2] = torch.cos(position * div_term)
         self.register_buffer('pe', pe)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
         Args:
-            x: Tensor, shape [seq_len, batch_size, embedding_dim]
+            x: Tensor, shape [batch_size, seq_len, embedding_dim]
         """
-        x = x + self.pe[:x.size(0)]
+        x = x + self.pe
         return self.dropout(x)
 
 class SingleHeadSelfAttention(nn.Module):
@@ -160,7 +160,8 @@ class TransformerBlock(nn.Module):
         self.layer_norm2 = nn.LayerNorm(emb_size)
 
     def forward(self, x):
-        x = x + self.sa(self.layer_norm1(x)) # first residual connection  ==> sa = self-attention
-        x = x + self.ffwd(self.layer_norm2(x)) # second residual connection
+        """x shape: (Bs, sent_len, embed_size)"""
+        x = x + self.sa(self.layer_norm1(x)) # first residual connection  ==> sa = self-attention  --> x shape: (Bs, sent_len, embed_size)
+        x = x + self.ffwd(self.layer_norm2(x)) # second residual connection                        --> x shape: (Bs, sent_len, embed_size)
         return x
 

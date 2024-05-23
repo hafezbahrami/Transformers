@@ -4,10 +4,11 @@ import torch.nn as nn
 from torch.nn import functional as F
 import torch.utils.tensorboard as tb
 
-from data_loader import get_train_test_data
+from loading_raw_data import get_train_test_data
 from model_simpler_version import BigramLanguageModel
 
 torch.manual_seed(1337)
+g = torch.Generator().manual_seed(1337)
 
 
 def train(args):
@@ -31,19 +32,20 @@ def train(args):
     encode_func, decode_func, vocab_size, train_data, val_data = get_train_test_data('input.txt')
 
     # data loading
-    def get_rand_batch_per_epoch(split):
+    def _fake_data_loader(split):
         """
-        generate a small random batch of data of inputs x and targets y, per training epoch.
-        For instance, for a batch_size of 4, and whole text size of 100, we get 4 random index to pick 4 sentences starting
-          at these 4 random indices:
-                                    torch.randint(100, (4,)) => tensor([74, 15, 61, 94])
+        This fakes the famous DataLoader class of Pytorch.
+
+        generate a few baches of data each filled with random X_input and Y_label.
+        For instance, for a batch_size=4, and whole text size of 100, we get 4 random indices that our 4 random sentences starts:
+                                    torch.randint(low=0,  high=100,  size=(4,)) => tensor([74, 15, 61, 94])
         """
         data = train_data if split == 'train' else val_data
-        ix = torch.randint(len(data) - sent_len, (batch_size,))
-        x = torch.stack([data[i:i + sent_len] for i in ix])
-        y = torch.stack([data[i + 1:i + sent_len + 1] for i in ix])
-        x, y = x.to(device), y.to(device)
-        return x, y
+        idxs = torch.randint(low=0,  high=len(data)-sent_len,  size=(batch_size,),  generator=g) # shape=(Bs,)  ==> idxs=tensor([10, 3, 432, ....])
+        X = torch.stack([data[idx: idx+sent_len] for idx in idxs])          # shape= (Bs, sent_len)
+        Y_lab = torch.stack([data[idx+1: idx+sent_len+1] for idx in idxs])  # shape= (Bs, sent_len)
+        X, Y_lab = X.to(device), Y_lab.to(device)
+        return X, Y_lab
 
     @torch.no_grad()
     def estimate_loss():
@@ -56,8 +58,8 @@ def train(args):
         for split in ['train', 'val']:
             losses = torch.zeros(loss_eval_epoch_interval)
             for k in range(loss_eval_epoch_interval):
-                X, Y = get_rand_batch_per_epoch(split)  # X: Bs X sent_len && Y: Bs X sent_len
-                logits, loss = model(X, Y)
+                X, Y_lab = _fake_data_loader(split)  # X: shape= (Bs, sent_len) && Y: shape= (Bs, sent_len)
+                Y_logits, loss = model(X, Y_lab)
                 losses[k] = loss.item()
             out[split] = losses.mean()
         model.train()  # setting the model back to training mode
@@ -82,7 +84,7 @@ def train(args):
                 valid_logger.add_scalar("AvgLoss/Valid", losses['val'], epoch)
 
         # sample a batch of data
-        xb, yb = get_rand_batch_per_epoch('train')
+        xb, yb = _fake_data_loader('train')
 
         # evaluate the loss
         logits, loss = model(xb, yb)
@@ -101,9 +103,9 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
     parser.add_argument("-epc", "--n_epochs", type=int, default=10000, help="# of epochs")
-    parser.add_argument("-bs", "--batch_size", type=int, default=64, help="batch size")
-    parser.add_argument("-sl", "--sent_len", type=int, default=256,
-                        help="Length of sentences to be passed into the encoder network")
+    parser.add_argument("-bs", "--batch_size", type=int, default=32, help="batch size") # 64
+    parser.add_argument("-sl", "--sent_len", type=int, default=8,
+                        help="Length of sentences to be passed into the encoder network") # 256
     parser.add_argument("-ebs", "--loss_eval_epoch_interval", type=int, default=200,
                         help="On what epoch interval to evaluate the avg loss")
     parser.add_argument("-lr", "--learning_rate", type=float, default=1e-3, help="Learning rate for optimizer")
