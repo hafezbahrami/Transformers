@@ -9,14 +9,14 @@ torch.manual_seed(1337)
 
 
 # super simple bigram model
-class BigramLanguageModel(nn.Module):
+class TransformerLM(nn.Module):
     """A BiGram Language model using the Transformer architecture"""
-    def __init__(self, vocab_size, emb_size, sent_len, n_head, n_layer, dropout, sinusoidal_pos_encoding=True):
+    def __init__(self, vocab_size, emb_size, sent_len, n_head, n_layer, dropout, sinusoidal_pos_enc_flag=True):
         super().__init__()
-        self.sinusoidal_pos_encoding = sinusoidal_pos_encoding
+        self.sinusoidal_pos_enc_flag = sinusoidal_pos_enc_flag
         self.sent_len = sent_len
         self.token_embedding_table = nn.Embedding(vocab_size, emb_size)
-        if sinusoidal_pos_encoding:
+        if sinusoidal_pos_enc_flag:
             self.position_embedding_table = PositionalEncoding(max_len=sent_len, emb_size=emb_size, dropout=dropout)
         else:
             self.position_embedding_table = nn.Embedding(sent_len, emb_size)
@@ -29,7 +29,7 @@ class BigramLanguageModel(nn.Module):
         Bs, T = X.shape # X: ==> shape: (Bs,T)  ==> T is sent length
         # idx and Y_lab are both (B,T) tensor of integers
         tok_emb = self.token_embedding_table(X) # (Bs,T,emb_size)
-        if self.sinusoidal_pos_encoding:
+        if self.sinusoidal_pos_enc_flag:
             pos_emb = self.position_embedding_table(tok_emb)  # (Bs, T, emb_size)
         else:
             pos_emb = self.position_embedding_table(torch.arange(T, device=device)) # (T, emb_size) --> Latere on, it will be BroadCast to match (Bs, T,emb_size)
@@ -71,11 +71,13 @@ class PositionalEncoding(nn.Module):
         super().__init__()
         self.dropout = nn.Dropout(p=dropout)
 
-        position = torch.arange(max_len).unsqueeze(1)
-        div_term = torch.exp(torch.arange(0, emb_size, 2) * (-math.log(10000.0) / emb_size))
+        position = torch.arange(max_len).unsqueeze(dim=1) # (max_len) ==> (max_len, 1)
+
+        even_XX = torch.arange(start=0, end=emb_size, step=2)
+        div_term = torch.exp(even_XX * (-math.log(10000.0) / emb_size)) # For instance for embed_size=8, div_term=[1, 0.1, 0.01, 0.001]
         pe = torch.zeros(max_len, emb_size)
-        pe[:, 0::2] = torch.sin(position * div_term)
-        pe[:, 1::2] = torch.cos(position * div_term)
+        pe[:, 0::2] = torch.sin(position * div_term) # For even-column==> shape: (max_len, 1)*(emb_size/2) = (max_len, emb_size/2)
+        pe[:, 1::2] = torch.cos(position * div_term) # For odd-column
         self.register_buffer('pe', pe)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -105,7 +107,7 @@ class SingleHeadSelfAttention(nn.Module):
         self.dropout = nn.Dropout(dropout)
 
     def forward(self, x):
-        Bs, T, a = x.shape # Bs: BatchSize, T: sent_length, Embed_size
+        Bs, T, C = x.shape # Bs: BatchSize, T: sent_length, Embed_size
         k = self.key(x)   # (Bs,T,head_embed_size)
         q = self.query(x) # (Bs,T,head_embed_size)
         # compute attention scores ("affinities")
@@ -115,7 +117,7 @@ class SingleHeadSelfAttention(nn.Module):
         wei = self.dropout(wei)
         # perform the weighted aggregation of the values
         v = self.value(x) # (Bs,T,head_embed_size)
-        out = wei @ v # C=head_embed_size => (Bs, T, T) @ (Bs, T, C) -> (Bs, T, C)
+        out = wei @ v # (Bs, T, T) @ (Bs, T, head_embed_size) ==> (Bs, T, head_embed_size)
         return out
 
 
@@ -129,9 +131,9 @@ class MultiHeadAttention(nn.Module):
         self.dropout = nn.Dropout(dropout)
 
     def forward(self, x):
-        out = torch.cat([h(x) for h in self.heads], dim=-1) # out: Bs X sent_len X (head_emb_size + head_emb_size + head_emb_size+ ...)
+        out = torch.cat([h(x) for h in self.heads], dim=-1) # out: (Bs, sent_len, (head_emb_size + head_emb_size + head_emb_size+ ...)) = (Bs, T, C)
         out = self.dropout(self.proj(out)) # This is why emb_size should be divisible by n_heads
-        return out # Thanks to self.proj layer, we get the same size embed after each mutiHeadAttention => out: Bs X sent_len X emb_size
+        return out # (Bs, T, C)
 
 
 class FeedFoward(nn.Module):

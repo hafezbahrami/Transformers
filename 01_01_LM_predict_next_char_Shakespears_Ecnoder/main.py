@@ -5,7 +5,7 @@ from torch.nn import functional as F
 import torch.utils.tensorboard as tb
 
 from loading_raw_data import get_train_test_data
-from model_simpler_version import BigramLanguageModel
+from model_simpler_version import TransformerLM
 
 torch.manual_seed(1337)
 g = torch.Generator().manual_seed(1337)
@@ -65,8 +65,8 @@ def train(args):
         model.train()  # setting the model back to training mode
         return out
 
-    model = BigramLanguageModel(vocab_size=vocab_size, emb_size=emb_size, sent_len=sent_len, n_head=n_head,
-                                n_layer=n_layer, dropout=dropout, sinusoidal_pos_encoding=True)
+    model = TransformerLM(vocab_size=vocab_size, emb_size=emb_size, sent_len=sent_len, n_head=n_head,
+                                n_layer=n_layer, dropout=dropout, sinusoidal_pos_enc_flag=True)
     m = model.to(device)
     # print the number of parameters in the model
     print(sum(p.numel() for p in m.parameters()) / 1e6, 'M parameters')
@@ -87,7 +87,7 @@ def train(args):
         xb, yb = _fake_data_loader('train')
 
         # evaluate the loss
-        logits, loss = model(xb, yb)
+        Y_logits, loss = model(xb, yb)
         optimizer.zero_grad(set_to_none=True)
         loss.backward()
         optimizer.step()
