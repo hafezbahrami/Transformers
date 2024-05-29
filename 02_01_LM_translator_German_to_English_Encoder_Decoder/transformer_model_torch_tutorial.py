@@ -80,32 +80,37 @@ class Seq2SeqTransformer(nn.Module):
                                        dim_feedforward=d_ff,
                                        dropout=dropout,
                                        batch_first=self.batch_first)
-        self.generator = nn.Linear(emb_size, vocab_size_dec)
+
         self.src_tok_emb = TokenEmbedding(vocab_size_enc, emb_size)
         self.tgt_tok_emb = TokenEmbedding(vocab_size_dec, emb_size)
         self.positional_encoding = PositionalEncoding(emb_size, dropout=dropout)
 
-    def forward(self, src: Tensor, tgt: Tensor,):
-        src_mask, tgt_mask, src_padding_mask, tgt_padding_mask = create_mask(src, tgt, self.src_pad_idx, self.device)
+        self.classification = nn.Linear(emb_size, vocab_size_dec)
+
+    def forward(self, X_src: Tensor, X_tgt: Tensor,):
+        """
+        X_src shape: (src_sent_len, Bs)
+        X_tgt shape: (tgt_sent_len, Bs)
+        """
+        src_mask, tgt_mask, src_padding_mask, tgt_padding_mask = create_mask(X_src, X_tgt, self.src_pad_idx, self.device)
         memory_key_padding_mask = src_padding_mask
 
         if self.batch_first:
-            src = src.permute(1, 0)
-            tgt = tgt.permute(1, 0)
-        src_emb = self.positional_encoding(self.src_tok_emb(src))
-        tgt_emb = self.positional_encoding(self.tgt_tok_emb(tgt))
-        outs = self.transformer(src_emb, tgt_emb, src_mask, tgt_mask, None,
+            X_src = X_src.permute(1, 0)
+            X_tgt = X_tgt.permute(1, 0)
+        X_src_emb = self.positional_encoding(self.src_tok_emb(X_src))
+        X_tgt_emb = self.positional_encoding(self.tgt_tok_emb(X_tgt))
+        X_outs = self.transformer(X_src_emb, X_tgt_emb, src_mask, tgt_mask, None,
                                 src_padding_mask, tgt_padding_mask, memory_key_padding_mask)
-        return self.generator(outs)
+        return self.classification(X_outs)
 
-    def encode(self, src: Tensor, src_mask: Tensor):
-        return self.transformer.encoder(self.positional_encoding(
-                            self.src_tok_emb(src)), src_mask)
+    def encode(self, X_src: Tensor, src_mask: Tensor):
+        pe = self.positional_encoding(self.src_tok_emb(X_src))
+        return self.transformer.encoder(pe, src_mask)
 
     def decode(self, tgt: Tensor, memory: Tensor, tgt_mask: Tensor):
-        return self.transformer.decoder(self.positional_encoding(
-                          self.tgt_tok_emb(tgt)), memory,
-                          tgt_mask)
+        pe = self.positional_encoding(self.tgt_tok_emb(tgt))
+        return self.transformer.decoder(pe, memory, tgt_mask)
 
 
 ######################################################################
@@ -116,20 +121,43 @@ class Seq2SeqTransformer(nn.Module):
 
 
 def generate_square_subsequent_mask(sz):
-    mask = (torch.triu(torch.ones((sz, sz), device=device)) == 1).transpose(0, 1)
-    mask = mask.float().masked_fill(mask == 0, float('-inf')).masked_fill(mask == 1, float(0.0))
+    """
+    sz = sent_length.
+    For example, for a sent_length=3:
+                    [[0, -inf, -inf],
+                     [0,   0,  -inf],
+                     [0,   0,    0 ]]
+    """
+    ones = torch.ones((sz, sz), device=device) 
+    triu = torch.triu(ones)  # For instance: [[1, 1, 1],
+    #                                         [0, 1, 1],
+    #                                         [0, 0, 1]]
+
+    mask1 = (triu == 1).transpose(0, 1) # For instance: [[T, F, F],
+    #                                                    [T, T, F],
+    #                                                    [T, T, T]]
+    mask1 = mask1.float().masked_fill(mask1 == False, float('-inf'))
+    mask = mask1.masked_fill(mask1 == 1, float(0.0))   # For instance: [[0, -inf, -inf],
+    #                                                                   [0,   0,  -inf],
+    #                                                                   [0,   0,    0 ]]
     return mask
 
 
 def create_mask(src, tgt, pad_idx, device="cpu"):
+    """
+    X_src shape: (src_sent_len, Bs)
+    X_tgt shape: (tgt_sent_len, Bs)
+    """    
     src_seq_len = src.shape[0]
     tgt_seq_len = tgt.shape[0]
 
-    tgt_mask = generate_square_subsequent_mask(tgt_seq_len).to(device)
-    src_mask = torch.zeros((src_seq_len, src_seq_len), device=device).type(torch.bool)
+    # While in the X_target (decoder) we want each word only get attention from previous words, in X_src each word get identical
+    # attentions from all previous and subsequnt (future) words. That is why src_mask is a zero matrix.
+    tgt_mask = generate_square_subsequent_mask(tgt_seq_len).to(device)                  # tgt_mask shape: (tgt_seq_len, tgt_seq_len)
+    src_mask = torch.zeros((src_seq_len, src_seq_len), device=device).type(torch.bool)  # src_mask shape: (src_seq_len, src_seq_len)
 
-    src_padding_mask = (src == pad_idx).transpose(0, 1)
-    tgt_padding_mask = (tgt == pad_idx).transpose(0, 1)
+    src_padding_mask = (src == pad_idx).transpose(0, 1) # src_padding_mask shape: (Bs, src_sent_len)
+    tgt_padding_mask = (tgt == pad_idx).transpose(0, 1) # tgt_padding_mask shape: (Bs, tgt_sent_len)
     return src_mask, tgt_mask, src_padding_mask, tgt_padding_mask
 
 #####################################################################################
@@ -146,7 +174,7 @@ def greedy_decode(model, src, src_mask, max_len, start_symbol, end_symbol, devic
         tgt_mask = (generate_square_subsequent_mask(ys.size(0)).type(torch.bool)).to(device)
         out = model.decode(ys, memory, tgt_mask)
         out = out.transpose(0, 1)
-        prob = model.generator(out[:, -1])
+        prob = model.classification(out[:, -1])
         _, next_word = torch.max(prob, dim=1)
         next_word = next_word.item()
 

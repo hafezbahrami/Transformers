@@ -8,7 +8,7 @@ from torch import Tensor
 import torch.utils.tensorboard as tb
 import torch.nn as nn
 
-from transformer_model import TransformerModel, generate_square_subsequent_mask
+# from transformer_model import TransformerModel, generate_square_subsequent_mask
 from model_simpler_version import TransformerLanguageModel
 from data_loader import get_train_test_eval_data, vocab, get_batch_x_y_sents
 from torchtext.vocab import Vocab

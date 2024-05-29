@@ -14,6 +14,8 @@ import torch
 from torch.utils.data import DataLoader
 from torch.nn.utils.rnn import pad_sequence
 
+torch.utils.data.datapipes.utils.common.DILL_AVAILABLE = torch.utils._import_utils.dill_available()  # Was added due to some error in loading Multi30K dataset from torchtext
+
 from torchtext.data.utils import get_tokenizer
 from torchtext.vocab import build_vocab_from_iterator
 from torchtext.datasets import multi30k, Multi30k
@@ -30,6 +32,17 @@ multi30k.URL["valid"] = "https://raw.githubusercontent.com/neychev/small_DL_repo
 
 def get_token_vocab(src_language: str = "de", tgt_language: str = "en", special_symbols=['<unk>', '<pad>', '<bos>', '<eos>'],
               special_symbol_idx={"UNK_IDX": 0, "PAD_IDX": 1, "BOS_IDX": 2, "EOS_IDX": 3}):
+    """
+    Below are some examples of how to use them:
+    (I)
+            for item in train_iter:
+                print(item)
+                break
+    
+    (II)
+    len(vocab["de"]) # > 19k words in German  ==> to for the embedding table
+    
+    """
     # Place-holders
     tokenizer = {}
     vocab = {}
@@ -44,22 +57,23 @@ def get_token_vocab(src_language: str = "de", tgt_language: str = "en", special_
     #    python -m spacy download en_core_web_sm
     #    python -m spacy download de_core_news_sm
     # (1) Building tokenizer
-    tokenizer[src_language] = get_tokenizer('spacy', language='de_core_news_sm') # => Example: tokenizer["en"]("I am book") => ['I', 'am', 'book']
+    tokenizer[src_language] = get_tokenizer('spacy', language='de_core_news_sm') # => Example: tokenizer["en"]("I am good") => ['I', 'am', 'good']
     tokenizer[tgt_language] = get_tokenizer('spacy', language='en_core_web_sm')
 
     # (2) Building vocab
+    language_index = {src_language: 0, tgt_language: 1}
     # helper function to yield list of tokens
     def yield_tokens(data_iter: Iterable, language: str) -> List[str]:
-        language_index = {src_language: 0, tgt_language: 1}
-
-        for data_sample in data_iter: # data_sample => ('Zwei junge ....', 'Two youg ....')
-            sampled_sentence = data_sample[language_index[language]] # 'Zwei junge ...'
-            tokenized_sentence = tokenizer[language](sampled_sentence) # ['Zwei', 'junge', ...]
+        ln_idx=language_index[language]
+        
+        for data_sample in data_iter:                               # data_sample => ('Zwei junge ....', 'Two youg ....')
+            X_sentence = data_sample[ln_idx]                        # 'Zwei junge ...'
+            tokenized_sentence = tokenizer[language](X_sentence)    # ['Zwei', 'junge', ...]
             yield tokenized_sentence
 
+    # Training data Iterator
+    train_iter = Multi30k(split='train', language_pair=(src_language, tgt_language)) # > 30k training sentences
     for ln in [src_language, tgt_language]:
-        # Training data Iterator
-        train_iter = Multi30k(split='train', language_pair=(src_language, tgt_language)) # > 30k training sentences
         # Create torchtext's Vocab object
         vocab[ln] = build_vocab_from_iterator(yield_tokens(train_iter, ln),
                                                         min_freq=1,
@@ -71,7 +85,7 @@ def get_token_vocab(src_language: str = "de", tgt_language: str = "en", special_
     for ln in [src_language, tgt_language]:
         vocab[ln].set_default_index(special_symbol_idx["UNK_IDX"])
 
-    return tokenizer, vocab
+    return tokenizer, vocab, train_iter
 
 
 def get_transformed_text(tokenizer, vocab, src_language, tgt_language, special_symbol_idx):

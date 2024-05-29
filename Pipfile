@@ -13,10 +13,13 @@ scikit-learn="*"
 #-------------------
 torch="*"
 tensorboard="*"
+torchtext="*"
+torchdata = "*"
+spacy = "*"
 
 [dev-packages]
 ipykernel="*"
-
+portalocker="*"
 
 [requires]
 python_version = "3.10"

@@ -41,13 +41,31 @@ def train(args):
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-    tokenizer, vocab = get_token_vocab(src_language=src_language,
+    tokenizer, vocab, train_iter = get_token_vocab(src_language=src_language,
                                        tgt_language=tgt_language,
                                        special_symbols=special_symbols,
                                        special_symbol_idx=special_symbol_idx)
 
-    src_vocab_size = len(vocab[src_language]) # > 19k words in German
-    tgt_vocab_size = len(vocab[tgt_language]) # > 10k words in English
+    src_vocab_size = len(vocab[src_language]) # > 19k words in German  ==> to for the embedding table
+    tgt_vocab_size = len(vocab[tgt_language]) # > 10k words in English ==> to for the embedding table
+
+
+    # ----------------------------------------------------------------------------------------------------------------------------------
+    # the train_data_loader below, Batch is not first dimension, this is because what we got from train_iter=Multi30k from torchdatasets
+    #               for item in train_iter:
+    #                    print(item)
+    #                    break
+    train_dataloader = data_loader(data_iter=train_iter, batch_size=batch_size,
+                                    special_symbol_idx=special_symbol_idx, tokenizer=tokenizer, vocab=vocab,
+                                    src_language=src_language, tgt_language=tgt_language,
+                                    shuffle=True)
+    
+    val_iter = Multi30k(split='valid', language_pair=(src_language, tgt_language))
+    val_dataloader = data_loader(data_iter=val_iter, batch_size=batch_size,
+                                special_symbol_idx=special_symbol_idx, tokenizer=tokenizer, vocab=vocab,
+                                src_language=src_language, tgt_language=tgt_language,
+                                shuffle=True)
+    # ----------------------------------------------------------------------------------------------------------------------------------    
 
     # Select what Transformer model to continue.
     if args.torch_tutorial_model:
@@ -61,10 +79,18 @@ def train(args):
         else:
             model_selected_class = TransformerModel
 
-    model = model_selected_class(vocab_size_enc=src_vocab_size, vocab_size_dec=tgt_vocab_size, emb_size=emb_size,
-                                 n_head=n_head, n_layers=n_layers, dropout=args.dropout, d_ff=args.ffn_hid_dim,
-                                 src_pad_idx=special_symbol_idx["PAD_IDX"], tgt_psd_idx=special_symbol_idx["PAD_IDX"],
-                                 max_seq_length=5000, batch_first=args.batch_first, device=device,)
+    model = model_selected_class(vocab_size_enc=src_vocab_size, 
+                                 vocab_size_dec=tgt_vocab_size, 
+                                 emb_size=emb_size,
+                                 n_head=n_head, 
+                                 n_layers=n_layers, 
+                                 dropout=args.dropout, 
+                                 d_ff=args.ffn_hid_dim,
+                                 src_pad_idx=special_symbol_idx["PAD_IDX"], 
+                                 tgt_psd_idx=special_symbol_idx["PAD_IDX"],
+                                 max_seq_length=5000,                       # to form positional embedding
+                                 batch_first=args.batch_first, 
+                                 device=device,)
 
     for p in model.parameters():
         if p.dim() > 1:
@@ -81,32 +107,33 @@ def train(args):
     for epoch in range(n_epochs):
         model.train()
         train_losses = 0
-        train_iter = Multi30k(split='train', language_pair=(src_language, tgt_language))
-        train_dataloader = data_loader(data_iter=train_iter, batch_size=batch_size,
-                                       special_symbol_idx=special_symbol_idx, tokenizer=tokenizer, vocab=vocab,
-                                       src_language=src_language, tgt_language=tgt_language,
-                                       shuffle=True)
 
-        for src, tgt in train_dataloader:
+        for X_src, tgt in train_dataloader:
             """
-            Go and call the collate_fn function to get transformed batch sentences. Sentences will be in vertical 
-            columns: src: src_sent_len X Bs  && tgt: tgt_sent_len X Bs
+            shapes==> X_src: (src_sent_len, Bs)  && tgt: (src_sent_len, Bs)
+            we have padded (same length) X_src. Similarly, for tgt.
+            
+            Below X_src and tgt is only for debugging and see how masking works in Transformers
+            X_src = torch.tensor([[9, 6, 1, 1],
+                                [9, 5, 2, 1]]).permute(1, 0)        ==> shape: (4,2)
+            tgt = torch.tensor([[9, 6, 5, 5, 1, 1],
+                                [9, 5, 5, 5, 2, 1]]).permute(1, 0)  ==> shape: (6,2)
             """
-            # Below src and tgt is only for debugging and see how masking works in Transformers
-            # src = torch.tensor([[9, 6, 1, 1],
-            #                     [9, 5, 2, 1]]).permute(1, 0)
-            # tgt = torch.tensor([[9, 6, 5, 5, 1, 1],
-            #                     [9, 5, 5, 5, 2, 1]]).permute(1, 0)
 
-            src, tgt = src.to(device), tgt.to(device) # we have padded (same length) src. Similarly, for tgt.
-            tgt_input = tgt[:-1, :]
 
-            logits = model(src, tgt_input) # Logits: tgt_sent_len X Bs X tgt_vocab_size, depending on batch_size_first
+            X_src, tgt = X_src.to(device), tgt.to(device) 
+            X_tgt_input = tgt[:-1, :]
+            Y_label = tgt[1:, :]                    # (tgt_sent_length, Bs) ==> ground truth for classes
 
+            Y_logits = model(X_src, X_tgt_input)    # Y_logits: (tgt_sent_len, Bs, tgt_vocab_size),    depending on batch_size_first
             optimizer.zero_grad()
 
-            tgt_out = tgt[1:, :] # tgt_sent_length X Bs ==> ground truth for classes
-            loss = loss_fn(logits.reshape(-1, logits.shape[-1]), tgt_out.reshape(-1))
+            num_of_classes = Y_logits.shape[-1]     # tgt_vocab_size
+            # Making things ready for our loss-function from tensor shape perspective
+            Y_logit_suits_loss = Y_logits.reshape(-1, num_of_classes)   # (tgt_sent_len * Bs, tgt_vocab_size),
+            Y_label_suits_loss = Y_label.reshape(-1)                    # (tgt_sent_length * Bs,)
+            loss = loss_fn(Y_logit_suits_loss, Y_label_suits_loss)
+            
             loss.backward()
 
             optimizer.step()
@@ -119,21 +146,16 @@ def train(args):
         model.eval()
         eval_losses = 0
 
-        val_iter = Multi30k(split='valid', language_pair=(src_language, tgt_language))
-        val_dataloader = data_loader(data_iter=val_iter, batch_size=batch_size,
-                                    special_symbol_idx=special_symbol_idx, tokenizer=tokenizer, vocab=vocab,
-                                    src_language=src_language, tgt_language=tgt_language,
-                                    shuffle=True)
         samples_ger_to_en = {}
         samples_ger_to_en[
             "Eine Gruppe von Menschen steht vor einem Iglu"] = "A group of people stand in front of an igloo."
         collect_samples = True
         max_count_sample = 4
         i = 0
-        for src, tgt in val_dataloader:
+        for X_src, tgt in val_dataloader:
             if collect_samples:
                 i += 0
-                sen = vocab["de"].lookup_tokens(list(src[:, 0].cpu().numpy()))
+                sen = vocab["de"].lookup_tokens(list(X_src[:, 0].cpu().numpy()))
                 src_sample = " ".join(sen).replace("<bos>", "").replace("<eos>", "").replace("<pad>", "")
                 sen = vocab["en"].lookup_tokens(list(tgt[:, 0].cpu().numpy()))
                 tgt_sample = " ".join(sen).replace("<bos>", "").replace("<eos>", "").replace("<pad>", "")
@@ -141,14 +163,14 @@ def train(args):
                 if i > max_count_sample:
                     break
 
-            src, tgt = src.to(device), tgt.to(device)
-            tgt_input = tgt[:-1, :]
+            X_src, tgt = X_src.to(device), tgt.to(device)
+            X_tgt_input = tgt[:-1, :]
 
-            logits = model(src, tgt_input)
+            Y_logits = model(X_src, X_tgt_input)
 
-            tgt_out = tgt[1:, :]
+            Y_label = tgt[1:, :]
 
-            loss = loss_fn(logits.reshape(-1, logits.shape[-1]), tgt_out.reshape(-1))
+            loss = loss_fn(Y_logits.reshape(-1, Y_logits.shape[-1]), Y_label.reshape(-1))
             eval_losses += loss.item()
 
         val_loss = eval_losses / len(list(val_dataloader))
