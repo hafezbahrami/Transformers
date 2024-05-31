@@ -362,14 +362,17 @@ def generate_square_subsequent_mask(sz: int) -> torch.Tensor:
 
 
 def create_mask(src, tgt, pad_idx, device):
-    src_seq_len = src.shape[0]
-    tgt_seq_len = tgt.shape[0]
+    """
+    0 or False: means that later by using F.softmax, we get np.exp("-inf"), and assign 0 attention for it.
+    """
+    src_seq_len = src.shape[0] # src: (T_s, B)
+    tgt_seq_len = tgt.shape[0] # src: (T_t, B)
 
     tgt_mask = generate_square_subsequent_mask(tgt_seq_len).to(device)
-    src_mask = torch.zeros((src_seq_len, src_seq_len), device=device).type(torch.bool)
+    src_mask = torch.ones((src_seq_len, src_seq_len), device=device).type(torch.bool)
 
-    src_padding_mask = (src == pad_idx).transpose(0, 1)
-    tgt_padding_mask = (tgt == pad_idx).transpose(0, 1)
+    src_padding_mask = (src != pad_idx).transpose(0, 1)
+    tgt_padding_mask = (tgt != pad_idx).transpose(0, 1)
     return src_mask, tgt_mask, src_padding_mask, tgt_padding_mask
 #####################################################################################
 
