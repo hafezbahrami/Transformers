@@ -131,14 +131,14 @@ class DecoderBlock(nn.Module):
         self.attn_norm = nn.LayerNorm(emb_size)
         self.ffwd_norm = nn.LayerNorm(emb_size)
 
-    def forward(self, tgt, enc_output, tgt_mask, src_padding_mask, tgt_padding_mask):
+    def forward(self, tgt, Y_enc_out, tgt_mask, src_padding_mask, tgt_padding_mask):
         y = tgt
         self_attn_mask = self._process_mask(tgt, tgt_mask, tgt_padding_mask)
         y = self.masked_attn_norm(y)
         y = tgt + self.masked_attn(q=y, k=y, v=y, mask=self_attn_mask)
 
         cross_head_attn_mask = self._process_mask(tgt, None, src_padding_mask)
-        y = y + self.attn(q=self.attn_norm(y), k=enc_output, v=enc_output, mask=cross_head_attn_mask)
+        y = y + self.attn(q=self.attn_norm(y), k=Y_enc_out, v=Y_enc_out, mask=cross_head_attn_mask)
 
         y = y + self.ffwd(self.ffwd_norm(y))
         return y
@@ -193,10 +193,10 @@ class Decoder(nn.Module):
             dec_lst.append(DecoderBlock(emb_size=emb_size, num_heads=num_heads, d_ff=d_ff, dropout=dropout, batch_first=batch_first))
         self.dec_blocks = nn.ModuleList(dec_lst)
 
-    def forward(self, tgt, enc_output, tgt_mask, src_padding_mask, tgt_padding_mask):
+    def forward(self, tgt, Y_enc_out, tgt_mask, src_padding_mask, tgt_padding_mask):
         output = tgt
         for layer in self.dec_blocks:
-            output = layer(output, enc_output, tgt_mask, src_padding_mask, tgt_padding_mask)
+            output = layer(output, Y_enc_out, tgt_mask, src_padding_mask, tgt_padding_mask)
         return output
 
 
