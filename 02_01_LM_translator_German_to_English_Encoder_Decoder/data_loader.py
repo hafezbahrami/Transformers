@@ -53,9 +53,15 @@ def get_token_vocab(src_language: str = "de", tgt_language: str = "en", special_
     # .. code-block:: python
     #
     #    pip install -U torchdata
+    #    pip install -U torchtext
+    #    pip install -U portalocker        
     #    pip install -U spacy
     #    python -m spacy download en_core_web_sm
     #    python -m spacy download de_core_news_sm
+
+    # we should also install/download: python -m spacy download en_core_web_sm  
+    # we should also install/download: python -m spacy download de_core_news_sm
+    
     # (1) Building tokenizer
     tokenizer[src_language] = get_tokenizer('spacy', language='de_core_news_sm') # => Example: tokenizer["en"]("I am good") => ['I', 'am', 'good']
     tokenizer[tgt_language] = get_tokenizer('spacy', language='en_core_web_sm')

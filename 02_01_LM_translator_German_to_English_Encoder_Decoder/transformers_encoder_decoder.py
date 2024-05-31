@@ -31,7 +31,8 @@ class SingleHeadSelfAttention(nn.Module):
 
         # below code requires debugging. It creates error as of now
         if mask is not None:
-            scores = scores + mask
+            # mask should have shape (T, T). All zero's (or False's) will be "-inf"
+            scores = scores.masked_fill(mask == 0, float('-inf'))
         
         weights = F.softmax(scores, dim=-1)
         outputs = torch.bmm(weights, value)

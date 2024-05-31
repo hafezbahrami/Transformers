@@ -7,9 +7,8 @@ import torch.utils.tensorboard as tb
 from torchtext.datasets import Multi30k
 
 from data_loader import get_token_vocab, data_loader
-from transformer_model_torch_tutorial import Seq2SeqTransformer, translate_torch_tutorial
-from transformers_encoder_decoder import TransformerModel, translate, create_mask
-from transformers_encoder_decoder_4dimensional_tensor import TransformerModel4Dimensional
+from transformer_torch_tutorial import Seq2SeqTransformer, translate_torch_tutorial
+from transformers_encoder_decoder import TransformerModel, translate
 
 torch.manual_seed(0)
 
@@ -73,11 +72,7 @@ def train(args):
         model_selected_class = Seq2SeqTransformer
     else:
         print("*** Using locally written Transformer model")
-        if args.fourDimensionalTensor:
-            print("*** Using 4 dimensional transformer tensor")
-            model_selected_class = TransformerModel4Dimensional
-        else:
-            model_selected_class = TransformerModel
+        model_selected_class = TransformerModel
 
     model = model_selected_class(vocab_size_enc=src_vocab_size, 
                                  vocab_size_dec=tgt_vocab_size, 
@@ -192,17 +187,18 @@ def train(args):
         print(f"**** Beam search flag is {b_search_flag} for generating the text.")
         for german_sent, eng_sent in samples_ger_to_en.items():
             translated_sents = translate_func(model=model,
-                            tgt_language=tgt_language, src_language=src_language,
-                            src_sentence=german_sent,
-                            special_symbol_idx=special_symbol_idx,
-                            tokenizer=tokenizer,
-                            vocab=vocab,
-                            device=device,
-                            beam_search_generation_approach = b_search_flag,
-                            beam_size=args.beam_search_beam_size,
-                            n_results=args.beam_search_n_results,
-                            max_length=args.beam_search_max_length,
-                            )
+                                                    tgt_language=tgt_language,
+                                                    src_language=src_language,
+                                                    src_sentence=german_sent,
+                                                    special_symbol_idx=special_symbol_idx,
+                                                    tokenizer=tokenizer,
+                                                    vocab=vocab,
+                                                    device=device,
+                                                    beam_search_generation_approach = b_search_flag,
+                                                    beam_size=args.beam_search_beam_size,
+                                                    n_results=args.beam_search_n_results,
+                                                    max_length=args.beam_search_max_length,
+                                                    )
             print(f"\"{german_sent}\" ==> Predicted Sentence: \"{translated_sents}\". ==> Ground Truth:  \"{eng_sent}\"")
 
 
@@ -211,7 +207,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
     parser.add_argument("-epc", "--n_epochs", type=int, default=1, help="# of epochs") # 30
-    parser.add_argument("-bs", "--batch_size", type=int, default=2, help="batch size")  # 128
+    parser.add_argument("-bs", "--batch_size", type=int, default=1, help="batch size")  # 128
     parser.add_argument("-lr", "--learning_rate", type=float, default=1.E-4, help="Learning rate for optimizer")
     parser.add_argument("-drp", "--dropout", type=float, default=0.2,
                         help="Dropout in feedforward layer within transformer")  # 0.2
@@ -219,13 +215,12 @@ if __name__ == "__main__":
                                             "translate it to another one. de is for Germann, and en for English.")
     parser.add_argument("-tgl", "--tgt_language", type=str, default="en", help="Target language that we want to "
                                         "translate the source language into. de is for Germann, and en for English.")
-    parser.add_argument("-esz", "--emb_size", type=int, default=6, help="embedding vector size")  # 512
+    parser.add_argument("-esz", "--emb_size", type=int, default=2, help="embedding vector size")  # 512
     parser.add_argument("-nhd", "--n_head", type=int, default=2, help="# of heads within self_attention")  # 8
     parser.add_argument("-ffd", "--ffn_hid_dim", type=int, default=10, help="Feed forward linear layer size")  # 512
     parser.add_argument("-ndl", "--n_layers", type=int, default=1, help="# of self-attention layer in decoder and encoder") #6
 
     parser.add_argument("--torch_tutorial_model", type=bool, default=False, help="Use torch tutorial transformer model")
-    parser.add_argument("--fourDimensionalTensor", type=bool, default=False, help="Use 4 dimensional tensor in Transformers")
 
     parser.add_argument("--batch_first", type=bool, default=False, help="Batch-size first for tensor calculation in the main self-attention.")
 
