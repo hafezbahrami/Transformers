@@ -185,7 +185,7 @@ def train(args):
         translate_func = translate
 
     # generate translated text for both beam-search and greedy approaches
-    beam_search_text_generation = [True, False]
+    beam_search_text_generation = [False]
     for b_search_flag in beam_search_text_generation:
         print(f"**** Beam search flag is {b_search_flag} for generating the text.")
         for german_sent, eng_sent in samples_ger_to_en.items():

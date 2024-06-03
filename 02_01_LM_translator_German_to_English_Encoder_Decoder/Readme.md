@@ -1,7 +1,7 @@
 # Transformer Details
 
 # Note:
-For now, the Transformer model from Pytorch Tutorial works fine, the Transfromer model I wrote form scratch does not get tranined well. Need further investigation
+For now, in generation phase, after training, the gredy method works fine, but not the beam-search approach. Need further investigation. main.py, line #188.
 
 ## Reference:
 - https://en.rattibha.com/thread/1470406419786698761
