@@ -114,10 +114,10 @@ def train(args):
             tgt = torch.tensor([[9, 6, 5, 5, 1, 1],
                                 [9, 5, 5, 5, 2, 1]]).permute(1, 0)  ==> shape: (6,2)
             """
-            X_src = torch.tensor([[9, 6, 1, 1],
-                                [9, 5, 2, 1]]).permute(1, 0)
-            tgt = torch.tensor([[9, 6, 5, 5, 1, 1],
-                                [9, 5, 5, 5, 2, 1]]).permute(1, 0)
+            # X_src = torch.tensor([[9, 6, 1, 1],
+            #                     [9, 5, 2, 1]]).permute(1, 0)
+            # tgt = torch.tensor([[9, 6, 5, 5, 1, 1],
+            #                     [9, 5, 5, 5, 2, 1]]).permute(1, 0)
 
             X_src, tgt = X_src.to(device), tgt.to(device) 
             X_tgt_input = tgt[:-1, :]
