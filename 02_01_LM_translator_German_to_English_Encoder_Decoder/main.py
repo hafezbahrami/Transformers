@@ -114,7 +114,10 @@ def train(args):
             tgt = torch.tensor([[9, 6, 5, 5, 1, 1],
                                 [9, 5, 5, 5, 2, 1]]).permute(1, 0)  ==> shape: (6,2)
             """
-
+            X_src = torch.tensor([[9, 6, 1, 1],
+                                [9, 5, 2, 1]]).permute(1, 0)
+            tgt = torch.tensor([[9, 6, 5, 5, 1, 1],
+                                [9, 5, 5, 5, 2, 1]]).permute(1, 0)
 
             X_src, tgt = X_src.to(device), tgt.to(device) 
             X_tgt_input = tgt[:-1, :]
@@ -215,8 +218,8 @@ if __name__ == "__main__":
                                             "translate it to another one. de is for Germann, and en for English.")
     parser.add_argument("-tgl", "--tgt_language", type=str, default="en", help="Target language that we want to "
                                         "translate the source language into. de is for Germann, and en for English.")
-    parser.add_argument("-esz", "--emb_size", type=int, default=2, help="embedding vector size")  # 512
-    parser.add_argument("-nhd", "--n_head", type=int, default=2, help="# of heads within self_attention")  # 8
+    parser.add_argument("-esz", "--emb_size", type=int, default=1, help="embedding vector size")  # 512
+    parser.add_argument("-nhd", "--n_head", type=int, default=1, help="# of heads within self_attention")  # 8
     parser.add_argument("-ffd", "--ffn_hid_dim", type=int, default=10, help="Feed forward linear layer size")  # 512
     parser.add_argument("-ndl", "--n_layers", type=int, default=1, help="# of self-attention layer in decoder and encoder") #6
 

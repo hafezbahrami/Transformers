@@ -3,6 +3,7 @@ import numpy as np
 import torch
 from torch import nn
 from torch.nn import functional as F
+from torch.nn.modules.normalization import LayerNorm
 import math
 
 from data_loader import get_transformed_text
@@ -74,15 +75,25 @@ class EncoderBlock(nn.Module):
         self.ffwd = FeedFoward(emb_size=emb_size, d_ff=d_ff, dropout=dropout)
 
         # layer norm
-        self.attn_norm = nn.LayerNorm(emb_size)
-        self.ffwd_norm = nn.LayerNorm(emb_size)
+        self.attn_norm = LayerNorm(emb_size, eps=1e-5, bias=True)
+        self.ffwd_norm = LayerNorm(emb_size, eps=1e-5, bias=True)
+
+        self.norm_first=False
 
     def forward(self, src, src_mask, src_padding_mask):
         mask = self._process_mask(src, src_mask, src_padding_mask)
         x = src
-        x = self.attn_norm(x)
-        x = src + self.attn(q=x, k=x, v=x, mask=mask)
-        x = x + self.ffwd(self.ffwd_norm(x))
+        if self.norm_first:
+            x = self.attn_norm(x)
+            x = src + self.attn(q=x, k=x, v=x, mask=mask)
+            x = x + self.ffwd(self.ffwd_norm(x))
+        else:
+            x = src + self.attn(q=x, k=x, v=x, mask=mask)
+            x = self.attn_norm(x)
+
+            x = x + self.ffwd(x)
+            x = self.ffwd_norm(x)
+
         return x
 
     def _process_mask(self, src, src_mask, src_padding_mask):
@@ -127,20 +138,34 @@ class DecoderBlock(nn.Module):
         self.ffwd = FeedFoward(emb_size=emb_size, d_ff=d_ff, dropout=dropout)
 
         # layer norm
-        self.masked_attn_norm = nn.LayerNorm(emb_size)
-        self.attn_norm = nn.LayerNorm(emb_size)
-        self.ffwd_norm = nn.LayerNorm(emb_size)
+        self.masked_attn_norm = LayerNorm(emb_size)
+        self.cross_attn_norm = LayerNorm(emb_size)
+        self.ffwd_norm = LayerNorm(emb_size)
+
+        self.norm_first = False
 
     def forward(self, tgt, Y_enc_out, tgt_mask, src_padding_mask, tgt_padding_mask):
-        y = tgt
         self_attn_mask = self._process_mask(tgt, tgt_mask, tgt_padding_mask)
-        y = self.masked_attn_norm(y)
-        y = tgt + self.masked_attn(q=y, k=y, v=y, mask=self_attn_mask)
-
         cross_head_attn_mask = self._process_mask(tgt, None, src_padding_mask)
-        y = y + self.attn(q=self.attn_norm(y), k=Y_enc_out, v=Y_enc_out, mask=cross_head_attn_mask)
 
-        y = y + self.ffwd(self.ffwd_norm(y))
+        y = tgt
+        if self.norm_first:
+            y = self.masked_attn_norm(y)
+            y = tgt + self.masked_attn(q=y, k=y, v=y, mask=self_attn_mask)
+
+            # cross_attention (memory attention)
+            y = y + self.attn(q=self.cross_attn_norm(y), k=Y_enc_out, v=Y_enc_out, mask=cross_head_attn_mask)
+            y = y + self.ffwd(self.ffwd_norm(y))
+        else:
+            y = tgt + self.masked_attn(q=y, k=y, v=y, mask=self_attn_mask)
+            y = self.masked_attn_norm(y)
+
+            # cross_attention (memory attention)
+            y = y + self.attn(q=y, k=Y_enc_out, v=Y_enc_out, mask=cross_head_attn_mask)
+            y = self.cross_attn_norm(y)
+            y = y + self.ffwd(y)
+            y = self.ffwd_norm(y)
+
         return y
 
     def _process_mask(self, src, src_mask, src_padding_mask):
@@ -264,11 +289,10 @@ class TransformerModel(nn.Module):
         self.batch_first = batch_first
 
         self.emb_size = emb_size
-        self.emb_layer_enc = nn.Embedding(vocab_size_enc, emb_size)
-        self.emb_layer_dec = nn.Embedding(vocab_size_dec, emb_size)
+        self.emb_layer_enc = TokenEmbedding(vocab_size_enc, emb_size)
+        self.emb_layer_dec = TokenEmbedding(vocab_size_dec, emb_size)
 
-        self.positional_layer_enc = PositionalEncoding(emb_size, dropout, self.max_seq_length)
-        self.positional_layer_dec = PositionalEncoding(emb_size, dropout, self.max_seq_length)
+        self.positional_encoding = PositionalEncoding(emb_size, dropout, self.max_seq_length)
 
         self.EncoderDecoderTransformer = EncoderDecoderTransformer(emb_size=emb_size, num_heads=n_head,
                                                                    num_encoders=n_layers, num_decoders=n_layers,
@@ -318,14 +342,25 @@ class TransformerModel(nn.Module):
             src = src.permute(1, 0)
             tgt = tgt.permute(1, 0)
         if (src is not None) and src_embedding:
-            src = self.emb_layer_enc(src) * math.sqrt(self.emb_size) # embed the input: shape 35X20Xembedding_size  --> embedding_size=200, [35, Bs] --> [35, Bs, em_size]
-            src = self.positional_layer_enc(src)
+            src = self.emb_layer_enc(src) # embed the input: shape 35X20Xembedding_size  --> embedding_size=200, [35, Bs] --> [35, Bs, em_size]
+            src = self.positional_encoding(src)
 
         if (tgt is not None) and tgt_embedding:
-            tgt = self.emb_layer_dec(tgt) * math.sqrt(self.emb_size)
-            tgt = self.positional_layer_dec(tgt)
+            tgt = self.emb_layer_dec(tgt)
+            tgt = self.positional_encoding(tgt)
 
         return src, tgt, src_mask, tgt_mask, src_padding_mask, tgt_padding_mask
+
+
+# helper Module to convert tensor of input indices into corresponding tensor of token embeddings
+class TokenEmbedding(nn.Module):
+    def __init__(self, vocab_size: int, emb_size):
+        super(TokenEmbedding, self).__init__()
+        self.embedding = nn.Embedding(vocab_size, emb_size)
+        self.emb_size = emb_size
+
+    def forward(self, tokens: torch.Tensor):
+        return self.embedding(tokens.long()) * math.sqrt(self.emb_size)
 
 
 class PositionalEncoding(nn.Module):
@@ -334,46 +369,84 @@ class PositionalEncoding(nn.Module):
     - https://kazemnejad.com/blog/transformer_architecture_positional_encoding/
     - http://jalammar.github.io/illustrated-transformer/
     """
-    def __init__(self, emb_size: int, dropout: float = 0.1, max_len: int = 5000):
-        super().__init__()
-        self.dropout = nn.Dropout(p=dropout)
+    # def __init__(self, emb_size: int, dropout: float = 0.1, max_len: int = 5000):
+    #     super().__init__()
+    #     self.dropout = nn.Dropout(p=dropout)
 
-        position = torch.arange(max_len).unsqueeze(1)
-        div_term = torch.exp(torch.arange(0, emb_size, 2) * (-math.log(10000.0) / emb_size))
-        pe = torch.zeros(max_len, 1, emb_size)
-        pe[:, 0, 0::2] = torch.sin(position * div_term)
-        pe[:, 0, 1::2] = torch.cos(position * div_term)
-        self.register_buffer('pe', pe)
+    #     position = torch.arange(max_len).unsqueeze(1)
+    #     div_term = torch.exp(torch.arange(0, emb_size, 2) * (-math.log(10000.0) / emb_size))
+    #     pe = torch.zeros(max_len, 1, emb_size)
+    #     pe[:, 0, 0::2] = torch.sin(position * div_term)
+    #     pe[:, 0, 1::2] = torch.cos(position * div_term)
+    #     self.register_buffer('pe', pe)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """
-        Args:
-            x: Tensor, shape [seq_len, batch_size, embedding_dim]
-        """
-        x = x + self.pe[:x.size(0)]
-        return self.dropout(x)
+    # def forward(self, x: torch.Tensor) -> torch.Tensor:
+    #     """
+    #     Args:
+    #         x: Tensor, shape [seq_len, batch_size, embedding_dim]
+    #     """
+    #     x = x + self.pe[:x.size(0)]
+    #     return self.dropout(x)
+    
+    def __init__(self,
+                 emb_size: int,
+                 dropout: float,
+                 maxlen: int = 5000):
+        super(PositionalEncoding, self).__init__()
+        den = torch.exp(- torch.arange(0, emb_size, 2)* math.log(10000) / emb_size)
+        pos = torch.arange(0, maxlen).reshape(maxlen, 1)
+        pos_embedding = torch.zeros((maxlen, emb_size))
+        pos_embedding[:, 0::2] = torch.sin(pos * den)
+        pos_embedding[:, 1::2] = torch.cos(pos * den)
+        pos_embedding = pos_embedding.unsqueeze(-2)
+
+        self.dropout = nn.Dropout(dropout)
+        self.register_buffer('pos_embedding', pos_embedding)
+
+    def forward(self, token_embedding: torch.Tensor):
+        return self.dropout(token_embedding + self.pos_embedding[:token_embedding.size(0), :])    
 
 #####################################################################################
-
-
-def generate_square_subsequent_mask(sz: int) -> torch.Tensor:
-    """Generates an upper-triangular matrix of -inf, with zeros on diag."""
-    return torch.triu(torch.ones(sz, sz) * float('-inf'), diagonal=1)
-
-
-def create_mask(src, tgt, pad_idx, device):
+def generate_square_subsequent_mask(sz: int, device="cpu") -> torch.Tensor:
     """
-    0 or False: means that later by using F.softmax, we get np.exp("-inf"), and assign 0 attention for it.
+    sz = sent_length.
+    For example, for a sent_length=3:
+                    [[0, -inf, -inf],
+                     [0,   0,  -inf],
+                     [0,   0,    0 ]]
     """
-    src_seq_len = src.shape[0] # src: (T_s, B)
-    tgt_seq_len = tgt.shape[0] # src: (T_t, B)
+    ones = torch.ones((sz, sz), device=device) 
+    triu = torch.triu(ones)  # For instance: [[1, 1, 1],
+    #                                         [0, 1, 1],
+    #                                         [0, 0, 1]]
 
-    tgt_mask = generate_square_subsequent_mask(tgt_seq_len).to(device)
-    src_mask = torch.ones((src_seq_len, src_seq_len), device=device).type(torch.bool)
+    mask1 = (triu == 1).transpose(0, 1) # For instance: [[T, F, F],
+    #                                                    [T, T, F],
+    #                                                    [T, T, T]]
+    mask1 = mask1.float().masked_fill(mask1 == False, float('-inf'))
+    mask = mask1.masked_fill(mask1 == 1, float(0.0))   # For instance: [[0, -inf, -inf],
+    #                                                                   [0,   0,  -inf],
+    #                                                                   [0,   0,    0 ]]
+    return mask
 
-    src_padding_mask = (src != pad_idx).transpose(0, 1)
-    tgt_padding_mask = (tgt != pad_idx).transpose(0, 1)
+
+def create_mask(src, tgt, pad_idx, device="cpu"):
+    """
+    X_src shape: (src_sent_len, Bs)
+    X_tgt shape: (tgt_sent_len, Bs)
+    """    
+    src_seq_len = src.shape[0]
+    tgt_seq_len = tgt.shape[0]
+
+    # While in the X_target (decoder) we want each word only get attention from previous words, in X_src each word get identical
+    # attentions from all previous and subsequnt (future) words. That is why src_mask is a zero matrix.
+    tgt_mask = generate_square_subsequent_mask(tgt_seq_len, device).to(device)                  # tgt_mask shape: (tgt_seq_len, tgt_seq_len)
+    src_mask = torch.zeros((src_seq_len, src_seq_len), device=device).type(torch.bool)  # src_mask shape: (src_seq_len, src_seq_len)
+
+    src_padding_mask = (src == pad_idx).transpose(0, 1) # src_padding_mask shape: (Bs, src_sent_len)
+    tgt_padding_mask = (tgt == pad_idx).transpose(0, 1) # tgt_padding_mask shape: (Bs, tgt_sent_len)
     return src_mask, tgt_mask, src_padding_mask, tgt_padding_mask
+
 #####################################################################################
 
 

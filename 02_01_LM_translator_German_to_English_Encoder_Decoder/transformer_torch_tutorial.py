@@ -18,8 +18,9 @@ from typing import Dict
 from torch import Tensor
 import torch
 import torch.nn as nn
-from torch.nn import Transformer
-# from torch_transformer import Transformer
+# Below 2 lines, both are for import from Original Transformer. I made a copy here for debug purpose
+from transformers_encoder_decoder_original_from_torch import Transformer
+#from torch_transformer import Transformer
 import math
 
 from data_loader import get_transformed_text
