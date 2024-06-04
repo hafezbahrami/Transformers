@@ -5,7 +5,7 @@ from torch.nn import functional as F
 import torch.utils.tensorboard as tb
 
 from loading_raw_data import get_train_test_data
-from model_simpler_version import TransformerLM
+from encoder_only_simpler_model import TransformerLM
 
 torch.manual_seed(1337)
 g = torch.Generator().manual_seed(1337)
@@ -93,7 +93,7 @@ def train(args):
         optimizer.step()
 
     # generate from the model
-    context = torch.zeros((1, 1), dtype=torch.long, device=device)
+    context = torch.zeros((1, sent_len), dtype=torch.long, device=device)
     print(decode_func(m.generate(context, max_len_sentence_to_be_created=2000)[0].tolist()))
 
 

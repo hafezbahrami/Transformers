@@ -17,6 +17,9 @@ import torch
 from torch import Tensor
 from torch.utils.data import dataset
 
+torch.utils.data.datapipes.utils.common.DILL_AVAILABLE = torch.utils._import_utils.dill_available()  # Was added due to some error in loading Multi30K dataset from torchtext
+
+
 print_sample_data = False
 
 train_iter = WikiText2(split='train')

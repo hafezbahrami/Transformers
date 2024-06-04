@@ -8,7 +8,7 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 torch.manual_seed(1337)
 
 
-# super simple bigram model
+# 
 class TransformerLM(nn.Module):
     """A BiGram Language model using the Transformer architecture"""
     def __init__(self, vocab_size, emb_size, sent_len, n_head, n_layer, dropout, sinusoidal_pos_enc_flag=True):
@@ -47,7 +47,7 @@ class TransformerLM(nn.Module):
             Y_lab = Y_lab.view(Bs*T)
             loss = F.cross_entropy(Y_logits, Y_lab)
 
-        return Y_lab, loss
+        return Y_logits, loss
 
     def generate(self, X, max_len_sentence_to_be_created):
         # X is (Bs, T) array of indices in the current context
